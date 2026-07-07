@@ -1,0 +1,44 @@
+# ============================================================
+# Autonomous Data Analyst Agent — Requirements
+# ============================================================
+# Phase 1: SQL Tool
+# Phase 2: RAG Pipeline
+# Phase 3: Code Execution Tool
+# Phase 4: LangGraph Agent
+# Phase 5: Streamlit UI
+# Phase 6: Extra Features
+# ============================================================
+
+# --- LLM & Agent Framework ---
+langchain>=0.2.0,<0.4.0
+langchain-groq>=0.1.0,<0.3.0
+langchain-community>=0.2.0,<0.4.0
+langgraph>=0.2.0,<0.4.0
+
+# --- Vector DB & Embeddings ---
+chromadb>=0.5.0,<0.7.0
+sentence-transformers>=2.7.0,<4.0.0
+
+# --- Database ---
+sqlalchemy>=2.0.0,<3.0.0
+
+# --- Data Processing ---
+pandas>=2.1.0,<3.0.0
+numpy>=1.26.0,<3.0.0
+
+# --- PDF Parsing ---
+pdfplumber>=0.10.0,<0.12.0
+
+# --- Charting ---
+plotly>=5.18.0,<6.0.0
+kaleido>=0.2.1,<0.3.0          # plotly static image export
+
+# --- UI ---
+streamlit>=1.30.0,<2.0.0
+
+# --- Utilities ---
+python-dotenv>=1.0.0,<2.0.0
+pydantic>=2.5.0,<3.0.0
+
+# --- PDF Report Export ---
+fpdf2>=2.7.0,<3.0.0
