@@ -248,6 +248,8 @@ def init_session_state():
         st.session_state.total_charts = 0
     if "agent_ready" not in st.session_state:
         st.session_state.agent_ready = False
+    if "uploaded_tables" not in st.session_state:
+        st.session_state.uploaded_tables = []
 
 
 def load_agent():
@@ -394,6 +396,118 @@ def render_sidebar():
 
         st.divider()
 
+        # --- CSV Upload ---
+        st.markdown("### 📂 Upload Your Data")
+        uploaded_file = st.file_uploader(
+            "Drop a CSV file to add it to the database",
+            type=["csv"],
+            help="The CSV will be loaded as a new table. You can then query it with natural language!",
+        )
+
+        if uploaded_file is not None:
+            import pandas as pd
+            import re as _re
+
+            # Read the uploaded file
+            try:
+                df_preview = pd.read_csv(uploaded_file)
+                uploaded_file.seek(0)  # Reset for later read
+
+                # Auto-suggest table name from filename
+                raw_name = Path(uploaded_file.name).stem
+                default_name = _re.sub(r'[^a-z0-9_]', '_', raw_name.lower()).strip('_')
+                default_name = _re.sub(r'_+', '_', default_name)  # collapse multi-underscores
+
+                table_name = st.text_input(
+                    "Table name",
+                    value=default_name,
+                    help="This will be the SQL table name. Use lowercase with underscores.",
+                    key="csv_table_name",
+                )
+
+                # Preview
+                st.markdown(f"**Preview** — {len(df_preview):,} rows × {len(df_preview.columns)} cols")
+                st.dataframe(df_preview.head(10), use_container_width=True, height=200)
+
+                # Column types
+                with st.expander("📋 Detected Columns"):
+                    col_info = pd.DataFrame({
+                        "Column": df_preview.columns,
+                        "Type": [str(dt) for dt in df_preview.dtypes],
+                        "Non-Null": [f"{df_preview[c].notna().sum()}/{len(df_preview)}" for c in df_preview.columns],
+                        "Sample": [str(df_preview[c].dropna().iloc[0])[:40] if df_preview[c].notna().any() else "—" for c in df_preview.columns],
+                    })
+                    st.dataframe(col_info, use_container_width=True, hide_index=True)
+
+                # Validate table name
+                valid_name = bool(_re.match(r'^[a-z][a-z0-9_]*$', table_name)) and len(table_name) >= 2
+                if not valid_name:
+                    st.warning("⚠️ Table name must start with a letter, use only `a-z`, `0-9`, `_`, and be ≥ 2 chars.")
+
+                # Load button
+                if st.button(
+                    f"📥 Load into database as `{table_name}`",
+                    use_container_width=True,
+                    disabled=not valid_name,
+                    type="primary",
+                ):
+                    with st.spinner(f"Loading {len(df_preview):,} rows into `{table_name}`..."):
+                        try:
+                            # Save temp CSV
+                            temp_path = Path("data") / f"_upload_{table_name}.csv"
+                            temp_path.parent.mkdir(parents=True, exist_ok=True)
+                            df_preview.to_csv(temp_path, index=False)
+
+                            # Ingest into SQLite
+                            from utils.db_loader import load_custom_csv_to_sqlite
+                            col_types = load_custom_csv_to_sqlite(
+                                csv_path=str(temp_path),
+                                table_name=table_name,
+                                db_path="data/database.db",
+                            )
+
+                            # Clean up temp file
+                            temp_path.unlink(missing_ok=True)
+
+                            # Track uploaded tables
+                            if "uploaded_tables" not in st.session_state:
+                                st.session_state.uploaded_tables = []
+                            st.session_state.uploaded_tables.append({
+                                "name": table_name,
+                                "rows": len(df_preview),
+                                "cols": len(df_preview.columns),
+                                "columns": list(df_preview.columns),
+                            })
+
+                            # Force agent to reinitialize SQL tool so it picks up new tables
+                            if st.session_state.agent:
+                                st.session_state.agent._sql_tool = None
+
+                            st.success(
+                                f"✅ Loaded **{len(df_preview):,} rows** into "
+                                f"table `{table_name}` ({len(col_types)} columns).\n\n"
+                                f"Try asking: *\"Show me the first 5 rows from {table_name}\"*"
+                            )
+                            st.balloons()
+                            time.sleep(1.5)
+                            st.rerun()
+
+                        except Exception as e:
+                            st.error(f"❌ Failed to load CSV: {e}")
+
+            except Exception as e:
+                st.error(f"❌ Could not read CSV file: {e}")
+
+        # Show uploaded tables
+        if st.session_state.get("uploaded_tables"):
+            st.markdown("**📊 Your Tables:**")
+            for tbl in st.session_state.uploaded_tables:
+                st.markdown(
+                    f"- `{tbl['name']}` — {tbl['rows']:,} rows, {tbl['cols']} cols"
+                )
+
+        st.divider()
+
         # Export PDF
         st.markdown("### 📥 Export")
         if st.button("📄 Export Chat as PDF", use_container_width=True):
@@ -434,6 +548,7 @@ def render_sidebar():
             st.session_state.messages = []
             st.session_state.total_queries = 0
             st.session_state.total_charts = 0
+            st.session_state.uploaded_tables = []
             if st.session_state.agent:
                 st.session_state.agent.clear_memory()
             st.rerun()
