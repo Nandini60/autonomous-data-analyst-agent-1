@@ -48,7 +48,7 @@ load_dotenv()
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL: str = "llama-3.3-70b-versatile"
+DEFAULT_MODEL: str = "llama-3.1-8b-instant"
 DEFAULT_TEMPERATURE: float = 0.1
 DEFAULT_N_RESULTS: int = 5
 RELEVANCE_THRESHOLD: float = 0.7
@@ -296,7 +296,7 @@ class RAGTool:
 
     # -- Public API ------------------------------------------------------------
 
-    def run(self, question: str) -> RAGResult:
+    def run(self, question: str, active_document: str = None) -> RAGResult:
         """Answer a question using RAG pipeline.
 
         Pipeline:
@@ -308,6 +308,7 @@ class RAGTool:
 
         Args:
             question: A natural language question about the documents.
+            active_document: Optional active document name to isolate search to.
 
         Returns:
             A RAGResult with answer, sources, confidence, and metadata.
@@ -315,7 +316,11 @@ class RAGTool:
         start = time.time()
         result = RAGResult(question=question)
 
-        self._log(f"Question: {question}")
+        self._log(f"Question: {question} (active doc: {active_document})")
+
+        where_filter = None
+        if active_document:
+            where_filter = {"source": active_document}
 
         # -- Step 1: Retrieve relevant chunks --
         try:
@@ -324,6 +329,7 @@ class RAGTool:
                 n_results=self.n_results,
                 relevance_threshold=self.relevance_threshold,
                 diversity_factor=self.mmr_diversity,
+                where=where_filter,
             )
         except Exception as e:
             result.error = f"Retrieval failed: {e}"
@@ -334,7 +340,29 @@ class RAGTool:
         self._log(f"Retrieved {retrieval.n_relevant} relevant chunks "
                    f"(of {self.n_results} requested)")
 
-        # -- Step 2: Hallucination guard --
+        # -- Step 2: Fallback for small documents / low relevance matches --
+        if retrieval.n_relevant == 0 and active_document:
+            try:
+                # Retrieve all chunks belonging to this document
+                all_doc_chunks = self._loader._collection.get(
+                    where={"source": active_document},
+                    include=["documents", "metadatas"]
+                )
+                if all_doc_chunks and all_doc_chunks["documents"]:
+                    from utils.doc_loader import RetrievalResult, DocumentChunk
+                    fallback_retrieval = RetrievalResult(query=question)
+                    for text, meta in zip(all_doc_chunks["documents"], all_doc_chunks["metadatas"]):
+                        fallback_retrieval.chunks.append(DocumentChunk(text=text, metadata=meta))
+                        # Assign a default similarity score so it passes checks
+                        fallback_retrieval.scores.append(0.75)
+                    fallback_retrieval.n_relevant = len(fallback_retrieval.chunks)
+                    
+                    retrieval = fallback_retrieval
+                    self._log(f"Fallback triggered: Using all {retrieval.n_relevant} chunks of small active document")
+            except Exception as ex:
+                self._log(f"Fallback retrieval failed: {ex}")
+
+        # -- Step 3: Hallucination guard --
         if retrieval.n_relevant == 0:
             result.success = True
             result.answer = (

@@ -521,6 +521,7 @@ class DocumentLoader:
         n_results: int = DEFAULT_N_RESULTS,
         relevance_threshold: float = RELEVANCE_THRESHOLD,
         diversity_factor: float = 0.3,
+        where: Optional[dict[str, Any]] = None,
     ) -> RetrievalResult:
         """Query with Maximal Marginal Relevance (MMR) for diverse results.
 
@@ -533,10 +534,11 @@ class DocumentLoader:
              MMR = lambda * sim(query, doc) - (1-lambda) * max(sim(doc, selected))
 
         Args:
-            query_text:          The search query.
-            n_results:           Number of final results to return.
-            relevance_threshold: Minimum similarity score.
-            diversity_factor:    Lambda for MMR (0 = max diversity, 1 = max relevance).
+          'query_text':          The search query.
+          'n_results':           Number of final results to return.
+          'relevance_threshold': Minimum similarity score.
+          'diversity_factor':    Lambda for MMR (0 = max diversity, 1 = max relevance).
+          'where':               Optional ChromaDB where filter dict.
 
         Returns:
             A RetrievalResult with diverse, relevant chunks.
@@ -547,11 +549,15 @@ class DocumentLoader:
             return RetrievalResult(query=query_text)
 
         # Get candidate results
-        results = self._collection.query(
-            query_texts=[query_text],
-            n_results=candidates_n,
-            include=["documents", "metadatas", "distances", "embeddings"],
-        )
+        query_params: dict[str, Any] = {
+            "query_texts": [query_text],
+            "n_results": candidates_n,
+            "include": ["documents", "metadatas", "distances", "embeddings"],
+        }
+        if where:
+            query_params["where"] = where
+
+        results = self._collection.query(**query_params)
 
         if not results["documents"] or not results["documents"][0]:
             return RetrievalResult(query=query_text)

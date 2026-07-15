@@ -240,6 +240,23 @@ def load_custom_csv_to_sqlite(
 
     engine = create_engine(f"sqlite:///{db_path}")
 
+    # Sanitize column names (lowercase, replace spaces/special chars with underscore)
+    import re
+    new_cols = {}
+    for col in df.columns:
+        c = str(col).strip().lower()
+        c = re.sub(r"[^a-z0-9_]", "_", c)
+        c = re.sub(r"_+", "_", c).strip("_")
+        if not c:
+            c = "column"
+        base = c
+        idx = 1
+        while c in new_cols.values():
+            c = f"{base}_{idx}"
+            idx += 1
+        new_cols[col] = c
+    df = df.rename(columns=new_cols)
+
     # Auto-detect date columns
     for col in df.columns:
         if df[col].dtype == "object":

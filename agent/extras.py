@@ -145,7 +145,7 @@ Format each insight as:
    *Action*: [What to do about it]
 """
 
-    def __init__(self, model: str = "llama-3.3-70b-versatile"):
+    def __init__(self, model: str = "llama-3.1-8b-instant"):
         api_key = os.getenv("GROQ_API_KEY")
         self._llm = ChatGroq(
             model=model,

@@ -46,7 +46,7 @@ load_dotenv()
 # -- Constants --------------------------------------------------------------
 
 MAX_RETRIES: int = 3
-DEFAULT_MODEL: str = "llama-3.3-70b-versatile"
+DEFAULT_MODEL: str = "llama-3.1-8b-instant"
 DEFAULT_TEMPERATURE: float = 0.0  # deterministic SQL generation
 MAX_ROWS: int = 500  # safety limit on returned rows
 
@@ -102,6 +102,8 @@ RULES:
 10. Prefer SUM/AVG/COUNT over subqueries where possible.
 11. Never use DELETE, DROP, INSERT, UPDATE, ALTER, or CREATE statements.
     You are read-only.
+12. When searching for names, search terms, or text values, always use case-insensitive partial matching (e.g., `LOWER(column) LIKE '%value%'` or `LIKE '%value%'`) rather than exact matches (`=`) to account for trailing spaces, first/last name variations, or differences in case.
+13. If asked about teammates, group members, or relationships of a person in a multi-student/multi-person schema, search for their name across ALL candidate columns (e.g., `student_1`, `student_2`, `student_3`) to match their group, and return all group details from the matching rows.
 
 {schema}
 """
@@ -247,42 +249,62 @@ class SQLTool:
                 return False
         return True
 
-    def _generate_sql(self, question: str) -> str:
+    def _generate_sql(self, question: str, active_tables: list[str] = None, chat_history: list = None) -> str:
         """Call the LLM to generate SQL from a natural language question.
 
         Args:
             question: The user's natural language question.
+            active_tables: Optional list of dynamic tables relevant to this session.
+            chat_history: Optional session-specific message history.
 
         Returns:
             A cleaned SQL query string.
         """
         system = SQL_SYSTEM_PROMPT.format(schema=self._schema)
+        if active_tables:
+            system = (
+                f"CONTEXT: The user is currently querying table(s): {', '.join(active_tables)}. "
+                "Unless specified otherwise, write your SQL queries to target these tables rather than default ones.\n\n"
+                + system
+            )
         messages = [
             SystemMessage(content=system),
-            HumanMessage(content=question),
         ]
+        if chat_history:
+            messages.extend(chat_history[-4:])
+        messages.append(HumanMessage(content=question))
         response = self._llm.invoke(messages)
         raw_sql = response.content
         return self._extract_sql(raw_sql)
 
-    def _fix_sql(self, question: str, failed_query: str, error: str) -> str:
+    def _fix_sql(self, question: str, failed_query: str, error: str, active_tables: list[str] = None, chat_history: list = None) -> str:
         """Ask the LLM to fix a failed SQL query.
 
         Args:
             question:     Original natural language question.
             failed_query: The SQL query that failed.
             error:        The error message from execution.
+            active_tables: Optional list of dynamic tables relevant to this session.
+            chat_history: Optional session-specific message history.
 
         Returns:
             A corrected SQL query string.
         """
         system = SQL_SYSTEM_PROMPT.format(schema=self._schema)
+        if active_tables:
+            system = (
+                f"CONTEXT: The user is currently querying table(s): {', '.join(active_tables)}. "
+                "Unless specified otherwise, write your SQL queries to target these tables rather than default ones.\n\n"
+                + system
+            )
         fix_msg = SQL_FIX_PROMPT.format(query=failed_query, error=error)
         messages = [
             SystemMessage(content=system),
-            HumanMessage(content=question),
-            HumanMessage(content=fix_msg),
         ]
+        if chat_history:
+            messages.extend(chat_history[-4:])
+        messages.append(HumanMessage(content=question))
+        messages.append(HumanMessage(content=fix_msg))
         response = self._llm.invoke(messages)
         return self._extract_sql(response.content)
 
@@ -345,7 +367,7 @@ class SQLTool:
 
     # -- Public API -----------------------------------------------------
 
-    def run(self, question: str) -> SQLResult:
+    def run(self, question: str, active_tables: list[str] = None, chat_history: list = None) -> SQLResult:
         """Execute the full NL -> SQL -> Results pipeline.
 
         The pipeline:
@@ -358,6 +380,8 @@ class SQLTool:
 
         Args:
             question: A natural language question about the data.
+            active_tables: Optional list of dynamic tables relevant to this session.
+            chat_history: Optional session-specific message history.
 
         Returns:
             A ``SQLResult`` dataclass with all execution details.
@@ -365,11 +389,11 @@ class SQLTool:
         start = time.time()
         result = SQLResult(question=question)
 
-        self._log(f"Question: {question}")
+        self._log(f"Question: {question} (active tables: {active_tables})")
 
         # -- Step 1: Generate SQL --------------------------------------
         try:
-            sql = self._generate_sql(question)
+            sql = self._generate_sql(question, active_tables=active_tables, chat_history=chat_history)
         except Exception as e:
             result.error = f"LLM generation failed: {e}"
             result.execution_time = time.time() - start
@@ -397,7 +421,7 @@ class SQLTool:
 
                 if attempt < self.max_retries:
                     try:
-                        sql = self._fix_sql(question, sql, last_error)
+                        sql = self._fix_sql(question, sql, last_error, active_tables=active_tables, chat_history=chat_history)
                         self._log(f"  Fixed SQL: {sql}")
                     except Exception as fix_err:
                         self._log(f"  Fix attempt failed: {fix_err}")

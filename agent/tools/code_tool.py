@@ -61,7 +61,7 @@ load_dotenv()
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL: str = "llama-3.3-70b-versatile"
+DEFAULT_MODEL: str = "llama-3.1-8b-instant"
 DEFAULT_TEMPERATURE: float = 0.1
 MAX_RETRIES: int = 3
 EXECUTION_TIMEOUT: int = 30  # seconds

@@ -55,7 +55,7 @@ load_dotenv()
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL: str = "llama-3.3-70b-versatile"
+DEFAULT_MODEL: str = "llama-3.1-8b-instant"
 DEFAULT_TEMPERATURE: float = 0.1
 
 
@@ -96,6 +96,7 @@ class AgentState(TypedDict, total=False):
         tools_used:      List of tool names that were invoked.
         chat_history:    Conversation history messages.
         multi_steps:     Steps for multi-hop queries.
+        active_document: Active document name.
     """
     question: str
     route: str
@@ -113,6 +114,7 @@ class AgentState(TypedDict, total=False):
     tools_used: list[str]
     chat_history: list
     multi_steps: list[dict]
+    active_document: str
 
 
 # ---------------------------------------------------------------------------
@@ -122,29 +124,24 @@ class AgentState(TypedDict, total=False):
 ROUTER_PROMPT = """You are an intelligent query router for a data analyst system.
 You have access to these tools:
 
-1. SQL -- Query a SQLite database containing Superstore Sales data
-   (orders, products, customers, returns tables with columns like
-   Sales, Profit, Quantity, Category, Sub_Category, Region, State,
-   Order_Date, Ship_Date, Customer_Name, Segment, etc.)
-   USE FOR: Questions about sales numbers, profits, counts, rankings,
-   trends over time, top/bottom performers, filtering by criteria.
+1. SQL -- Query a SQLite database.
+   Currently loaded tables: {database_tables}
+   USE FOR: Questions about sales, profits, counts, rankings, trends, filtering by criteria, or any custom loaded spreadsheet.
 
-2. RAG -- Search uploaded PDF business documents
-   (Q1 2024 Market Analysis Report, Product Return Policy, Sales Strategy Memo)
-   USE FOR: Questions about company policies, strategic plans, market analysis,
-   qualitative business information, recommendations, return policies.
+2. RAG -- Search uploaded PDF business documents.
+   Active document for this session: {active_document}
+   USE FOR: Questions about company policies, strategic plans, market analysis, or qualitative/text information from the active PDF/Word/Text document.
 
-3. CODE -- Write and execute Python code for computation/visualization
-   USE FOR: Mathematical calculations, statistical analysis, creating charts
-   and visualizations, data transformations, what-if scenarios, forecasting.
+3. CODE -- Write and execute Python code for computation/visualization.
+   USE FOR: Mathematical calculations, statistical analysis, creating charts/visualizations, forecasting.
 
-4. MULTI -- Combine multiple tools for complex multi-step questions
-   USE FOR: Questions that need data from the database AND documents,
-   or that need to query data AND then visualize/analyze it.
+4. MULTI -- Combine multiple tools for complex multi-step questions.
+   USE FOR: Questions that need data from SQL AND RAG, or that need to query data AND then visualize/analyze it.
 
-5. DIRECT -- Answer directly without any tool
-   USE FOR: Greetings, general knowledge, clarification questions,
-   questions about the system's capabilities.
+5. DIRECT -- Answer directly without any tool.
+   USE FOR: Greetings, general knowledge, clarification questions, or capabilities summary.
+
+{doc_routing_instruction}
 
 Given the user's question, respond with EXACTLY this format:
 ROUTE: <tool_name>
@@ -377,9 +374,65 @@ class DataAnalystAgent:
                 history_lines.append(f"{role}: {msg.content[:150]}")
             history_ctx = "Recent conversation:\n" + "\n".join(history_lines)
 
+        # Build dynamic list of database tables
+        try:
+            sql_tool = self._get_sql_tool()
+            tables = sql_tool.get_table_names()
+            database_tables = ", ".join(tables)
+        except Exception:
+            database_tables = "orders, products, customers, returns"
+
+        active_doc = state.get("active_document") or "None (General Chat)"
+
+        # Generate doc-type-specific routing instructions
+        doc_routing_instruction = ""
+        if active_doc and active_doc != "None (General Chat)":
+            from pathlib import Path
+            ext = Path(active_doc).suffix.lower()
+            if ext in (".csv", ".xlsx", ".xls"):
+                import re
+                stem = Path(active_doc).stem.lower()
+                stem_clean = re.sub(r"[^a-z0-9_]", "_", stem).strip("_")
+                stem_clean = re.sub(r"_+", "_", stem_clean)
+                
+                try:
+                    sql_tool = self._get_sql_tool()
+                    all_tables = sql_tool.get_table_names()
+                    matching = [t for t in all_tables if t == stem_clean or t.startswith(f"{stem_clean}_")]
+                except Exception:
+                    matching = []
+                
+                if matching:
+                    doc_routing_instruction = (
+                        f"CRITICAL DOCUMENT ROUTING RULE: The active document '{active_doc}' is a SPREADSHEET loaded into "
+                        f"database table(s): {', '.join(matching)}. Any questions asking about contents of, lists in, "
+                        f"or queries on this document MUST be routed to SQL (to query the tables) or CODE (to process/visualize). "
+                        "Do NOT route queries about this spreadsheet to RAG."
+                    )
+                else:
+                    doc_routing_instruction = (
+                        f"CRITICAL DOCUMENT ROUTING RULE: The active document '{active_doc}' is a spreadsheet. "
+                        "Ensure queries about it are routed to SQL or CODE, NOT RAG."
+                    )
+            else:
+                doc_routing_instruction = (
+                    f"CRITICAL DOCUMENT ROUTING RULE: The active document '{active_doc}' is a TEXT document (PDF/Doc/Text) indexed in RAG. "
+                    "All questions seeking summaries, searches, or text contents from this document must be routed to RAG."
+                )
+
+        # If it is a spreadsheet, RAG has no access to it, so we mask active_document for RAG template parameter
+        rag_active_doc = active_doc
+        if active_doc and active_doc != "None (General Chat)":
+            from pathlib import Path
+            if Path(active_doc).suffix.lower() in (".csv", ".xlsx", ".xls"):
+                rag_active_doc = "None (Spreadsheets are loaded into SQL tables, not RAG)"
+
         prompt = ROUTER_PROMPT.format(
             question=question,
             history_context=history_ctx,
+            database_tables=database_tables,
+            active_document=rag_active_doc,
+            doc_routing_instruction=doc_routing_instruction,
         )
 
         try:
@@ -441,11 +494,32 @@ class DataAnalystAgent:
             Updated state with sql_result.
         """
         question = state["question"]
-        self._log("Executing SQL Tool ...")
+        doc = state.get("active_document")
+        self._log(f"Executing SQL Tool ... (active doc: {doc})")
+
+        # Find tables matching active_document
+        active_tables = []
+        if doc:
+            try:
+                import re
+                from pathlib import Path
+                stem = Path(doc).stem.lower()
+                stem_clean = re.sub(r"[^a-z0-9_]", "_", stem).strip("_")
+                stem_clean = re.sub(r"_+", "_", stem_clean)
+
+                sql_tool = self._get_sql_tool()
+                all_tables = sql_tool.get_table_names()
+
+                # Check for direct match or prefix match
+                for t in all_tables:
+                    if t == stem_clean or t.startswith(f"{stem_clean}_"):
+                        active_tables.append(t)
+            except Exception as ex:
+                self._log(f"[WARN] Error matching active tables: {ex}")
 
         try:
             sql_tool = self._get_sql_tool()
-            result = sql_tool.run(question)
+            result = sql_tool.run(question, active_tables=active_tables or None, chat_history=state.get("chat_history"))
 
             # Extract data from the DataFrame
             data_list = []
@@ -491,7 +565,7 @@ class DataAnalystAgent:
 
         try:
             rag_tool = self._get_rag_tool()
-            result = rag_tool.run(question)
+            result = rag_tool.run(question, active_document=state.get("active_document"))
 
             rag_result = {
                 "success": result.success,
@@ -650,14 +724,19 @@ class DataAnalystAgent:
         question = state["question"]
         self._log("Answering directly (no tool needed)")
 
+        active_doc = state.get("active_document") or "None"
         try:
             messages = [
                 SystemMessage(content=(
-                    "You are a helpful data analyst assistant. Answer the "
-                    "user's question directly. If they're asking about your "
-                    "capabilities, explain that you can: query databases (SQL), "
-                    "search documents (RAG), write & execute Python code, "
-                    "and create visualizations."
+                    f"You are a helpful data analyst assistant. The active document in this chat session is: '{active_doc}'.\n"
+                    "Answer the user's question or greeting directly.\n"
+                    "If the user asks about the active document or says they provided/uploaded a document, inform them that the document is loaded and active in this session, and explain how you can help them analyze it.\n"
+                    "Specifically, if the active document is a spreadsheet (.csv, .xlsx, .xls), explain that it is loaded into the SQLite database and you can write SQL queries to search, list, filter, or calculate its columns.\n"
+                    "If it is a text document (PDF/Word/Text), explain that it is indexed in RAG and you can search its textual contents.\n"
+                    "If the user is giving a brief acknowledgment (like 'ok', 'thanks', 'cool', 'got it') or feedback (like 'you did correct'), "
+                    "just respond politely, acknowledge their comment, and invite them to ask more questions about the active document or data.\n"
+                    "Do NOT say that you don't have access to the document or that you don't see it, as it is already active in this session.\n"
+                    "If they're asking about your capabilities, explain that you can query databases (SQL), search documents (RAG), write & execute Python code, and create visualizations."
                 )),
             ]
             # Add chat history
@@ -821,17 +900,23 @@ class DataAnalystAgent:
 
     # -- Public API --------------------------------------------------------
 
-    def run(self, question: str) -> dict[str, Any]:
+    def run(self, question: str, active_document: str = None, chat_history: list = None) -> dict[str, Any]:
         """Run the agent on a user question.
 
         Args:
             question: Natural language question.
+            active_document: Optional active document name.
+            chat_history: Optional list of LangChain message objects to load.
 
         Returns:
             Dict with answer, sources, figures, confidence, etc.
         """
         start = time.time()
-        self._log(f"Question: {question}")
+        self._log(f"Question: {question} (active doc: {active_document})")
+
+        # Load chat history if provided
+        if chat_history is not None:
+            self._chat_history = list(chat_history)
 
         # Build initial state
         initial_state: AgentState = {
@@ -846,6 +931,7 @@ class DataAnalystAgent:
             "error": "",
             "tools_used": [],
             "chat_history": list(self._chat_history[-6:]),
+            "active_document": active_document,
         }
 
         # Run the graph
