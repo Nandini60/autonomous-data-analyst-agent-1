@@ -37,7 +37,19 @@ class AuthManager:
     def _ensure_file(self):
         self.users_file.parent.mkdir(parents=True, exist_ok=True)
         if not self.users_file.exists():
-            self.users_file.write_text("{}", encoding="utf-8")
+            # Seed a default demo account so it survives ephemeral deploys
+            default_users = {
+                "nandini": {
+                    "password_hash": "522f393cf836ad0e0531c888315bbf78e1aa3edb63bdffebf63f8deabb637ca7:7e16f4bc8219a9a2cf7d131d28f3ecb4524c32c8fab30f55026deae6467d2600",
+                    "display_name": "Nandini",
+                    "avatar_color": "#6C63FF",
+                    "created_at": "2026-07-15T19:30:00"
+                }
+            }
+            self.users_file.write_text(
+                json.dumps(default_users, indent=2, ensure_ascii=False),
+                encoding="utf-8"
+            )
 
     def _load(self) -> dict:
         return json.loads(self.users_file.read_text(encoding="utf-8"))
