@@ -18,6 +18,7 @@ import ToolBadge from './ToolBadge';
 import { useStore } from '../store';
 import { themes } from '../theme';
 import type { Message } from '../api';
+import Plot from 'react-plotly.js';
 
 interface Props {
   message: Message;
@@ -246,6 +247,37 @@ export default function ChatMessage({
                 {executionTime.toFixed(2)}s
               </span>
             )}
+          </div>
+        )}
+
+        {/* Plotly Charts */}
+        {!isUser && meta.figures_json && meta.figures_json.length > 0 && (
+          <div className="mt-3 flex flex-col gap-4 w-full" style={{ maxWidth: '100%' }}>
+            {meta.figures_json.map((figStr: string, idx: number) => {
+              try {
+                const fig = typeof figStr === 'string' ? JSON.parse(figStr) : figStr;
+                return (
+                  <div key={idx} className="rounded-xl overflow-hidden border" style={{ borderColor: isDark ? 'rgba(255,255,255,0.06)' : t.border, background: isDark ? '#0d0d12' : '#ffffff' }}>
+                    <Plot
+                      data={fig.data}
+                      layout={{
+                        ...fig.layout,
+                        autosize: true,
+                        margin: { l: 40, r: 20, t: 40, b: 40 },
+                        paper_bgcolor: 'transparent',
+                        plot_bgcolor: 'transparent',
+                        font: { color: isDark ? '#9a9aa8' : t.textPrimary, family: 'Inter, sans-serif' }
+                      }}
+                      useResizeHandler={true}
+                      style={{ width: '100%', height: '100%', minHeight: '350px' }}
+                      config={{ displayModeBar: false, responsive: true }}
+                    />
+                  </div>
+                );
+              } catch (e) {
+                return null;
+              }
+            })}
           </div>
         )}
 
