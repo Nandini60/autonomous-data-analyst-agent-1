@@ -124,7 +124,7 @@ class CodeResult:
 CODE_SYSTEM_PROMPT = """You are an expert Python data analyst. Generate Python code
 to answer the user's question. Follow these rules strictly:
 
-1. Output ONLY executable Python code. No markdown fences, no explanations.
+1. Output ONLY executable Python code. ALWAYS wrap your code in ```python ... ``` markdown fences. No explanations outside the fences.
 2. Use these libraries as needed: pandas (as pd), numpy (as np), plotly.express (as px),
    plotly.graph_objects (as go), math, statistics, datetime.
 3. For visualizations, ALWAYS use Plotly (never matplotlib).
