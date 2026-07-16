@@ -321,23 +321,28 @@ class DocumentLoader:
 
         Tries sentence-transformers first. Falls back to ChromaDB's
         built-in ONNX-based default embedding function if there is
-        a torch/torchvision version conflict.
+        a torch/torchvision version conflict or memory constraints.
 
         Returns:
             A chromadb embedding function instance.
         """
-        # Strategy 1: sentence-transformers (preferred)
-        try:
-            from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-            ef = SentenceTransformerEmbeddingFunction(
-                model_name=self.embedding_model_name,
-            )
-            # Quick smoke test to ensure it actually works
-            ef(["test"])
-            self._log("  Using SentenceTransformer embeddings")
-            return ef
-        except Exception as e:
-            self._log(f"  SentenceTransformer unavailable ({type(e).__name__}), trying fallback...")
+        lightweight = os.environ.get("LIGHTWEIGHT_MODE", "").lower() in ("1", "true", "yes")
+
+        # Strategy 1: sentence-transformers (preferred, skip if lightweight)
+        if not lightweight:
+            try:
+                from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+                ef = SentenceTransformerEmbeddingFunction(
+                    model_name=self.embedding_model_name,
+                )
+                # Quick smoke test to ensure it actually works
+                ef(["test"])
+                self._log("  Using SentenceTransformer embeddings")
+                return ef
+            except Exception as e:
+                self._log(f"  SentenceTransformer unavailable ({type(e).__name__}), trying fallback...")
+        else:
+            self._log("  LIGHTWEIGHT_MODE enabled, skipping SentenceTransformer")
 
         # Strategy 2: ChromaDB default (ONNX runtime, all-MiniLM-L6-v2)
         try:
