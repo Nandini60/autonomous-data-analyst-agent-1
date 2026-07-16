@@ -95,13 +95,25 @@ def _get_agent():
         from utils.db_loader import load_csvs_to_sqlite
 
         if not Path(DB_PATH).exists():
-            generate_all(data_dir=str(ROOT / "data"))
-            load_csvs_to_sqlite(data_dir=str(ROOT / "data"), db_path=DB_PATH)
+            lightweight = os.environ.get("LIGHTWEIGHT_MODE", "").lower() in ("1", "true", "yes")
+            if lightweight:
+                Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+                # Create empty SQLite DB
+                import sqlite3
+                conn = sqlite3.connect(DB_PATH)
+                conn.close()
+            else:
+                generate_all(data_dir=str(ROOT / "data"))
+                load_csvs_to_sqlite(data_dir=str(ROOT / "data"), db_path=DB_PATH)
 
         dd = Path(DOCS_DIR)
         if not dd.exists() or not list(dd.glob("*.pdf")):
-            from utils.generate_docs import generate_all_docs
-            generate_all_docs(outdir=DOCS_DIR)
+            lightweight = os.environ.get("LIGHTWEIGHT_MODE", "").lower() in ("1", "true", "yes")
+            if lightweight:
+                dd.mkdir(parents=True, exist_ok=True)
+            else:
+                from utils.generate_docs import generate_all_docs
+                generate_all_docs(outdir=DOCS_DIR)
 
         _agent = DataAnalystAgent(db_path=DB_PATH, docs_dir=DOCS_DIR, verbose=False)
         _agent_ready = True
