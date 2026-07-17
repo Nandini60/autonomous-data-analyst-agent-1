@@ -17,8 +17,11 @@ const ACCEPT: Record<string, string[]> = {
   'text/csv': ['.csv'],
   'application/pdf': ['.pdf'],
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+  'application/msword': ['.doc', '.docx'],
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+  'application/vnd.ms-excel': ['.xls', '.xlsx'],
   'text/plain': ['.txt'],
+  'application/octet-stream': ['.docx', '.csv', '.pdf', '.xlsx', '.txt'],
 };
 
 export default function FileUpload({
