@@ -314,9 +314,9 @@ def get_schema_description(db_path: str | Path = "data/database.db") -> str:
             nullable = "NULL" if col.get("nullable", True) else "NOT NULL"
             lines.append(f"  * {col['name']:25s}  {col_type:12s}  {nullable}")
 
-        # Add sample data (first 3 rows)
+        # Add sample data (first 5 rows for better LLM context)
         with engine.connect() as conn:
-            result = conn.execute(text(f"SELECT * FROM {table_name} LIMIT 3"))
+            result = conn.execute(text(f"SELECT * FROM {table_name} LIMIT 5"))
             sample_rows = result.fetchall()
             col_names = result.keys()
 
@@ -330,6 +330,12 @@ def get_schema_description(db_path: str | Path = "data/database.db") -> str:
         with engine.connect() as conn:
             count = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar()
         lines.append(f"\n  Total rows: {count:,}")
+
+    lines.append("\n" + "=" * 60)
+    lines.append("NOTE: Column names above may be sanitized versions of the")
+    lines.append("original names (spaces→underscores, lowercase). Use the")
+    lines.append("sample data to understand what each column actually contains.")
+    lines.append("When searching for text, search ALL text columns using OR.")
 
     return "\n".join(lines)
 

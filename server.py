@@ -306,33 +306,40 @@ async def upload_file(
     file: UploadFile = File(...),
     username: str = Form(...),
 ):
-    agent = _get_agent()
-    if not agent:
-        raise HTTPException(500, "Agent not ready")
+    try:
+        agent = _get_agent()
+        if not agent:
+            raise HTTPException(500, "Agent not ready — server may be initializing. Please try again in 30 seconds.")
 
-    # Save to disk
-    dest = UPLOAD_DIR / file.filename
-    with open(dest, "wb") as f:
-        content = await file.read()
-        f.write(content)
+        # Save to disk
+        dest = UPLOAD_DIR / file.filename
+        with open(dest, "wb") as f:
+            content = await file.read()
+            f.write(content)
 
-    # Also copy PDFs to docs dir
-    if file.filename.lower().endswith(".pdf"):
-        docs = Path(DOCS_DIR)
-        docs.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(dest, docs / file.filename)
+        # Also copy PDFs/DOCX to docs dir for RAG indexing
+        if file.filename.lower().endswith((".pdf", ".docx", ".txt")):
+            docs = Path(DOCS_DIR)
+            docs.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(dest, docs / file.filename)
 
-    # Process
-    result = process_file(str(dest), agent, DB_PATH)
+        # Process
+        result = process_file(str(dest), agent, DB_PATH)
 
-    if result["success"]:
-        title = f"📄 {file.filename}"
-        sid = _history.create_session(username, title, file.filename)
-        result["session_id"] = sid
-    else:
-        raise HTTPException(400, result["message"])
+        if result["success"]:
+            title = f"📄 {file.filename}"
+            sid = _history.create_session(username, title, file.filename)
+            result["session_id"] = sid
+        else:
+            raise HTTPException(400, result["message"])
 
-    return result
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Upload failed: {e}")
+        raise HTTPException(500, f"Upload processing failed: {str(e)}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -350,13 +357,27 @@ def get_schema():
 
 
 # ══════════════════════════════════════════════════════════════
+# STARTUP EVENT — Preload agent in background
+# ══════════════════════════════════════════════════════════════
+
+@app.on_event("startup")
+def startup_preload():
+    """Preload the agent in a background thread on server start.
+
+    This is critical for Render deployments where `uvicorn server:app`
+    doesn't trigger __main__, so without this the first request would
+    bear the full agent initialization cost (and likely timeout).
+    """
+    import threading
+    threading.Thread(target=_get_agent, daemon=True).start()
+    print("[STARTUP] Agent preloading in background thread...")
+
+
+# ══════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     import uvicorn
     print("Starting Parse Line API on http://localhost:8000")
-    # Preload agent in background
-    import threading
-    threading.Thread(target=_get_agent, daemon=True).start()
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -90,10 +90,8 @@ RULES:
 2. Always use SQLite-compatible syntax.
 3. Use table and column names EXACTLY as shown in the schema below.
 4. When a question requires data from multiple tables, use appropriate
-   JOINs. The key relationships are:
-     * orders.customer_id  -> customers.customer_id
-     * orders.product_id   -> products.product_id
-     * orders.order_id     -> returns.order_id
+   JOINs. Look at the column names to identify foreign key relationships
+   (e.g., matching column names between tables like customer_id, product_id).
 5. For date filtering use the format 'YYYY-MM-DD'.
 6. Use aliases to make output columns human-readable.
 7. Always include ORDER BY for ranking queries.
@@ -102,8 +100,20 @@ RULES:
 10. Prefer SUM/AVG/COUNT over subqueries where possible.
 11. Never use DELETE, DROP, INSERT, UPDATE, ALTER, or CREATE statements.
     You are read-only.
-12. When searching for names, search terms, or text values, always use case-insensitive partial matching (e.g., `LOWER(column) LIKE '%value%'` or `LIKE '%value%'`) rather than exact matches (`=`) to account for trailing spaces, first/last name variations, or differences in case.
-13. If asked about teammates, group members, or relationships of a person in a multi-student/multi-person schema, search for their name across ALL candidate columns (e.g., `student_1`, `student_2`, `student_3`) to match their group, and return all group details from the matching rows.
+12. When searching for names, search terms, or text values, always use
+    case-insensitive partial matching (e.g., `LOWER(column) LIKE '%value%'`)
+    rather than exact matches (`=`).
+13. If asked about teammates, group members, or relationships of a person
+    in a multi-student/multi-person schema, search for their name across ALL
+    candidate columns (e.g., `student_1`, `student_2`, `student_3`).
+14. When searching for a keyword (like "RAG", "NLP", etc.), search across
+    ALL TEXT columns in the table using OR conditions. For example:
+    `WHERE LOWER(col1) LIKE '%rag%' OR LOWER(col2) LIKE '%rag%' OR ...`
+15. When asked for "item number N" or "row number N", use LIMIT 1 OFFSET (N-1)
+    to return the Nth row. Or use a subquery with ROW_NUMBER() if needed.
+16. IMPORTANT: Look at the sample data in the schema to understand what each
+    column actually contains. Column names may be sanitized (underscores
+    replacing spaces), so use the sample data to understand the real meaning.
 
 {schema}
 """

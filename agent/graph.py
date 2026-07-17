@@ -394,6 +394,10 @@ class DataAnalystAgent:
                 stem = Path(active_doc).stem.lower()
                 stem_clean = re.sub(r"[^a-z0-9_]", "_", stem).strip("_")
                 stem_clean = re.sub(r"_+", "_", stem_clean)
+                # Match file_processor._sanitize_table_name: add t_ prefix if starts with digit
+                if not stem_clean or not stem_clean[0].isalpha():
+                    stem_clean = "t_" + stem_clean
+                stem_clean = stem_clean[:50]
                 
                 try:
                     sql_tool = self._get_sql_tool()
@@ -506,6 +510,10 @@ class DataAnalystAgent:
                 stem = Path(doc).stem.lower()
                 stem_clean = re.sub(r"[^a-z0-9_]", "_", stem).strip("_")
                 stem_clean = re.sub(r"_+", "_", stem_clean)
+                # Match file_processor._sanitize_table_name: add t_ prefix if starts with digit
+                if not stem_clean or not stem_clean[0].isalpha():
+                    stem_clean = "t_" + stem_clean
+                stem_clean = stem_clean[:50]
 
                 sql_tool = self._get_sql_tool()
                 all_tables = sql_tool.get_table_names()
